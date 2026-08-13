@@ -1,0 +1,4 @@
+briefs/*.md
+!briefs/.gitkeep
+__pycache__/
+*.pyc

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Fraud daily brief</title>
+  </head>
+  <body>
+    <outline text="Novel fraud and schemes">
+      <outline text="Krebs on Security" type="rss" xmlUrl="https://krebsonsecurity.com/feed/" htmlUrl="https://krebsonsecurity.com"/>
+      <!-- The Paypers RSS 200 HTML, not a feed, as of 2026-08-13 (https://thepaypers.com/rss). Do not guess a replacement. -->
+      <!-- ACFE / Fraud Magazine public RSS 404 as of 2026-08-13 (https://www.fraud-magazine.com/rss/). Do not guess a replacement. -->
+    </outline>
+    <outline text="Vendor M&amp;A">
+      <outline text="Finextra Payments" type="rss" xmlUrl="https://www.finextra.com/rss/channel.aspx?channel=payments" htmlUrl="https://www.finextra.com"/>
+      <outline text="Payments Dive" type="rss" xmlUrl="https://www.paymentsdive.com/feeds/news/" htmlUrl="https://www.paymentsdive.com"/>
+      <outline text="Banking Dive" type="rss" xmlUrl="https://www.bankingdive.com/feeds/news/" htmlUrl="https://www.bankingdive.com"/>
+    </outline>
+    <outline text="Product and tech">
+      <outline text="Biometric Update" type="rss" xmlUrl="https://www.biometricupdate.com/feed" htmlUrl="https://www.biometricupdate.com"/>
+      <outline text="PYMNTS" type="rss" xmlUrl="https://www.pymnts.com/feed/" htmlUrl="https://www.pymnts.com"/>
+    </outline>
+    <outline text="Enforcement and regulation">
+      <!-- FTC press RSS 403 as of 2026-08-13 (https://www.ftc.gov/feeds/press-release.xml). Do not guess a replacement. -->
+      <outline text="DOJ news" type="rss" xmlUrl="https://www.justice.gov/news/rss" htmlUrl="https://www.justice.gov"/>
+      <outline text="CFPB newsroom" type="rss" xmlUrl="https://www.consumerfinance.gov/about-us/newsroom/feed/" htmlUrl="https://www.consumerfinance.gov"/>
+      <outline text="FCA news" type="rss" xmlUrl="https://www.fca.org.uk/news/rss.xml" htmlUrl="https://www.fca.org.uk"/>
+      <outline text="SEC press releases" type="rss" xmlUrl="https://www.sec.gov/news/pressreleases.rss" htmlUrl="https://www.sec.gov"/>
+      <!-- FinCEN public RSS 404 as of 2026-08-13 (https://www.fincen.gov/news-room/rss.xml). Do not guess a replacement. -->
+      <!-- ICO public RSS 404 as of 2026-08-13 (https://ico.org.uk/feed/). Do not guess a replacement. -->
+    </outline>
+  </body>
+</opml>
