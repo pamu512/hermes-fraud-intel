@@ -428,7 +428,56 @@ def check_insight_seeds(dump_recent) -> None:
     if "mule" not in seeds.lower() or "https://example.com/mule" not in seeds:
         fail("insight seeds must cite clustered URLs")
     print("OK  insight seeds")
+    check_collapse(dump_recent)
     check_render(dump_recent)
+
+
+def check_collapse(dump_recent) -> None:
+    Item = dump_recent.Item
+    finextra = Item(
+        title="Yuno Raises $45 Million to Drive Global Payments Push - Finextra",
+        url="https://www.finextra.com/newsarticle/yuno",
+        description="The payments orchestration firm raised a Series B.",
+        published=None,
+        source="Finextra Fraud",
+    )
+    pymnts = Item(
+        title="Yuno Raises $45 Million to Drive Global Payments Push",
+        url="https://www.pymnts.com/yuno-raises-45-million/",
+        description="Yuno raised $45 million in a Series B for payments orchestration.",
+        published=None,
+        source="PYMNTS",
+    )
+    collapsed = dump_recent.collapse_duplicates([finextra, pymnts])
+    if len(collapsed) != 1:
+        fail(f"same story must collapse to one item, got {len(collapsed)}")
+    urls = {collapsed[0].url, *(url for _src, url in collapsed[0].extra)}
+    if urls != {finextra.url, pymnts.url}:
+        fail(f"collapsed item must keep both URLs, got {urls}")
+    rendered = dump_recent.render_brief(
+        dump_recent.route_items(collapsed), [], [], "2026-08-18", total=1
+    )
+    if finextra.url not in rendered or pymnts.url not in rendered:
+        fail("render_brief must embed both outlet URLs")
+
+    ohio = Item(
+        title="Card ring busted in Ohio",
+        url="https://example.com/ohio",
+        description="Police arrested a card fraud ring in Ohio.",
+        published=None,
+        source="Krebs",
+    )
+    deep = Item(
+        title="Deepfake KYC bypass hits lenders",
+        url="https://example.com/kyc",
+        description="Deepfake videos beat KYC liveness checks at banks.",
+        published=None,
+        source="Biometric Update",
+    )
+    clusters = dump_recent.cluster_items([ohio, deep])
+    if any(c.term == "fraud" and {i.url for i in c.items} == {ohio.url, deep.url} for c in clusters):
+        fail("unrelated stories must not cluster on generic fraud")
+    print("OK  collapse + entity clusters")
 
 
 def check_render(dump_recent) -> None:
