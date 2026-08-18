@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 BIN_DIR="${HERMES_FRAUD_BIN_DIR:-$HOME/.local/bin}"
+WHATSAPP_TO="${FRAUD_BRIEF_WHATSAPP:-+85252238641}"
+DELIVER="local,whatsapp:${WHATSAPP_TO}"
 MODEL="7b"
 SKIP_HERMES=0
 SKIP_CRON=0
@@ -141,30 +143,85 @@ install_skill() {
   info "copied skill to $dest"
 }
 
+install_wrapper() {
+  local dest="$HERMES_HOME/scripts/fraud-daily-brief.sh"
+  mkdir -p "$HERMES_HOME/scripts"
+  cat >"$dest" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export HERMES_FRAUD_ROOT=$(printf '%q' "$ROOT")
+cd "\$HERMES_FRAUD_ROOT"
+python3 scripts/dump_recent.py --write-brief
+DAY="\$(date +%F)"
+if [[ -f "briefs/\$DAY.md" ]]; then
+  cat "briefs/\$DAY.md"
+  exit 0
+fi
+if [[ -f "briefs/\$DAY.failed.md" ]]; then
+  cat "briefs/\$DAY.failed.md"
+  exit 1
+fi
+echo "fraud-daily-brief: no brief written for \$DAY" >&2
+exit 1
+EOF
+  chmod +x "$dest"
+  info "installed no-agent wrapper $dest"
+}
+
+whatsapp_hint() {
+  if [[ -f "$HERMES_HOME/.env" ]] && grep -Eq '^WHATSAPP_ENABLED=true([[:space:]]|$)' "$HERMES_HOME/.env"; then
+    info "WhatsApp enabled — cron delivers to $DELIVER"
+    return
+  fi
+  info "WhatsApp gateway not enabled yet. Cron still targets $DELIVER."
+  info "Next: hermes gateway setup  (WhatsApp, self-chat, scan QR). Then hermes gateway restart."
+}
+
 create_cron() {
   [[ "$SKIP_CRON" -eq 0 ]] || { info "skipping cron"; return; }
   need_cmd hermes
+  install_wrapper
   local prompt
   prompt="$(cat "$ROOT/skills/fraud-daily-brief/references/cron-prompt.txt")"
   if hermes cron list 2>/dev/null | grep -qi "finance-daily-brief"; then
     info "finance-daily-brief cron present — leaving it untouched"
   fi
+  whatsapp_hint
   if hermes cron list 2>/dev/null | grep -qi "fraud-daily-brief"; then
-    info "refreshing cron job fraud-daily-brief (script writes LLM brief; agent must not rewrite)"
+    info "refreshing cron job fraud-daily-brief (no-agent wrapper + $DELIVER)"
+    if hermes cron edit fraud-daily-brief \
+      --no-agent \
+      --script fraud-daily-brief.sh \
+      --deliver "$DELIVER" \
+      --workdir "$ROOT" \
+      --schedule "30 7 * * *"; then
+      return
+    fi
+    info "no-agent edit failed — falling back to agent job that prints the brief"
     hermes cron edit fraud-daily-brief \
       --agent \
       --script "" \
       --prompt "$prompt" \
       --skill fraud-daily-brief \
+      --deliver "$DELIVER" \
       --workdir "$ROOT" \
       --schedule "30 7 * * *"
     return
   fi
   info "creating daily cron 30 7 * * * (machine local timezone — use Asia/Singapore on this Mac)"
+  if hermes cron create "30 7 * * *" \
+    --name "fraud-daily-brief" \
+    --no-agent \
+    --script fraud-daily-brief.sh \
+    --deliver "$DELIVER" \
+    --workdir "$ROOT"; then
+    return
+  fi
+  info "no-agent create failed — falling back to agent job that prints the brief"
   hermes cron create "30 7 * * *" "$prompt" \
     --name "fraud-daily-brief" \
     --skill fraud-daily-brief \
-    --deliver local \
+    --deliver "$DELIVER" \
     --workdir "$ROOT"
 }
 

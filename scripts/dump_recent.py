@@ -17,10 +17,12 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OPML = ROOT / "feeds" / "fraud.opml"
@@ -81,6 +83,25 @@ STOP = frozenset(
     percent million billion trillion according via per
     """.split()
 )
+GENERIC_BEAT = frozenset(
+    """
+    fraud scam mule launder aml bsa kyc kyb cft sanctions sar identity
+    synthetic ato phishing spoof chargeback cnp 3ds psd2 biometric
+    passkey liveness deepfake bec
+    """.split()
+)
+PHRASES = (
+    "app fraud",
+    "account takeover",
+    "authorized push",
+    "confirmation of payee",
+    "friendly fraud",
+    "refund abuse",
+    "card-not-present",
+    "first-party",
+    "bust-out",
+)
+OUTLET_SUFFIX = re.compile(r"\s+[-–—|]\s+[A-Za-z][A-Za-z0-9 .&'/]{1,40}$")
 BRIEFS_DIR = ROOT / "briefs"
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 MODEL_TAG = os.environ.get("FRAUD_BRIEF_MODEL", "qwen2.5-7b-64k")
@@ -94,6 +115,7 @@ class Item:
     description: str
     published: datetime | None
     source: str
+    extra: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -253,8 +275,77 @@ def filter_since(
 
 
 def item_tokens(item: Item) -> set[str]:
-    blob = f"{item.title} {item.description}".lower()
-    return {t for t in TOKEN.findall(blob) if t not in STOP and BEAT.search(t)}
+    blob = f"{item.title} {item.description}"
+    raw = {t.lower() for t in TOKEN.findall(blob) if t.lower() not in STOP}
+    entities = {
+        t.lower()
+        for t in re.findall(r"\b[A-Z][A-Za-z0-9$%-]{2,}\b", blob)
+        if t.lower() not in STOP
+    }
+    low = blob.lower()
+    phrases = {phrase.replace(" ", "-") for phrase in PHRASES if phrase in low}
+    specific = entities | phrases | (raw - GENERIC_BEAT)
+    if specific:
+        return specific
+    return {t for t in raw if BEAT.search(t) or t in GENERIC_BEAT}
+
+
+def norm_title(title: str) -> str:
+    text = (title or "").casefold().strip()
+    text = OUTLET_SUFFIX.sub("", text)
+    return re.sub(r"\s+", " ", text)
+
+
+def norm_url(url: str) -> str:
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    host = (parsed.netloc or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    path = (parsed.path or "").rstrip("/").lower()
+    return f"{host}{path}"
+
+
+def collapse_duplicates(items: list[Item]) -> list[Item]:
+    groups: list[list[Item]] = []
+    for item in items:
+        title_key = norm_title(item.title)
+        url_key = norm_url(item.url)
+        placed = False
+        for group in groups:
+            if any(
+                (title_key and norm_title(other.title) == title_key)
+                or (url_key and norm_url(other.url) == url_key)
+                for other in group
+            ):
+                group.append(item)
+                placed = True
+                break
+        if not placed:
+            groups.append([item])
+    collapsed: list[Item] = []
+    for group in groups:
+        group.sort(
+            key=lambda i: (
+                -len(i.description or ""),
+                -(i.published.timestamp() if i.published else 0),
+            )
+        )
+        primary = group[0]
+        seen = {primary.url}
+        extras = list(primary.extra)
+        for other in group[1:]:
+            if other.url not in seen:
+                extras.append((other.source, other.url))
+                seen.add(other.url)
+            for src, url in other.extra:
+                if url not in seen:
+                    extras.append((src, url))
+                    seen.add(url)
+        primary.extra = extras
+        collapsed.append(primary)
+    return collapsed
 
 
 def cluster_items(items: list[Item], min_docs: int = 2) -> list[Cluster]:
@@ -429,9 +520,13 @@ def implication_fact(title: str, description: str) -> str | None:
 
 def format_item(item: Item) -> str:
     allowed = "allowed" if may_write_implication(item.title, item.description) else "omit"
+    also = ""
+    if item.extra:
+        also = "Also " + ", ".join(f"[{src}]({url})" for src, url in item.extra) + ".\n\n"
     return (
         f"### [{item.title}]({item.url})\n\n"
         f"{clip_lede(item.description)}\n\n"
+        f"{also}"
         f"Implication: {allowed}\n"
     )
 
@@ -551,6 +646,10 @@ def render_brief(
             lines.append("")
             lines.append(lede)
             lines.append("")
+            if item.extra:
+                also = ", ".join(f"[{src}]({url})" for src, url in item.extra)
+                lines.append(f"Also {also}.")
+                lines.append("")
             fact = implication_fact(item.title, item.description)
             if fact:
                 lines.append(f"Implication: {fact}")
@@ -574,15 +673,26 @@ def dump_feeds(
     now = datetime.now(timezone.utc)
     failures: list[str] = []
     collected: list[Item] = []
-    for _category, title, url in load_opml(opml):
+
+    def pull(title: str, url: str) -> tuple[str, list[Item], str | None]:
         try:
             xml_bytes = fetch_xml(url)
             items = filter_since(parse_feed(xml_bytes, source=title), cutoff, now=now)
-            collected.extend(item for item in items if keep_item(item))
+            return title, [item for item in items if keep_item(item)], None
         except (urllib.error.URLError, urllib.error.HTTPError, ET.ParseError, TimeoutError, OSError, ValueError) as exc:
-            failures.append(f"{title}: {exc}")
-            continue
+            return title, [], f"{title}: {exc}"
 
+    feeds = list(load_opml(opml))
+    workers = min(8, max(1, len(feeds)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(pull, title, url) for _category, title, url in feeds]
+        for fut in as_completed(futures):
+            _title, items, err = fut.result()
+            if err:
+                failures.append(err)
+            collected.extend(items)
+
+    collected = collapse_duplicates(collected)
     grouped = route_items(collected)
     chunks: list[str] = [
         f"# RSS dump — last {hours}h (UTC cutoff {cutoff.isoformat()})",

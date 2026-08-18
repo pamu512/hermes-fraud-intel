@@ -1,7 +1,7 @@
 ---
 name: fraud-daily-brief
 description: Cluster fraud RSS into a cited daily markdown brief.
-version: 0.5.0
+version: 0.6.0
 author: pamu (pamu512), Hermes Agent
 license: MIT
 platforms: [linux, macos]
@@ -38,13 +38,13 @@ terminal(command="python3 scripts/dump_recent.py --write-brief", timeout=600)
 ## Quick Reference
 
 - Dump+LLM: `terminal(command="python3 scripts/dump_recent.py --write-brief", timeout=600)`
-- Output: `briefs/YYYY-MM-DD.md` with `[title](url)` headlines
+- Output: `briefs/YYYY-MM-DD.md` with `[title](url)` headlines; that file is the cron/WhatsApp body
 
 ## Procedure
 
 1. Run `terminal(command="python3 scripts/dump_recent.py --write-brief", timeout=600)`. Completion: stdout is one line `Wrote briefs/YYYY-MM-DD.md (...)`. A dead feed must not abort the job.
 2. Do not rewrite the file. Do not paraphrase items. Do not use `write_file` on `briefs/*.md`.
-3. Your final response is that one-line status. Stop.
+3. Your entire final response is the exact contents of `briefs/YYYY-MM-DD.md` (use `read_file`). WhatsApp delivery uses that response. Do not paraphrase.
 4. If `dump_recent.py` cannot run, write `briefs/YYYY-MM-DD.failed.md`. Do not fail silently.
 
 ## Pitfalls
